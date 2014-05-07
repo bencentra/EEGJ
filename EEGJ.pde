@@ -189,13 +189,13 @@ void setup() {
 	myStage = new ScrollingStage(WIDTH/2, KNOB_Y/2, WIDTH/3, HEIGHT);
 	//thread("drawStageStuff");
 	// Graph setup
-  	relaxGraphBG = loadImage("relax_gradient2.png");
-  	focusGraphBG = loadImage("focus_gradient2.png");
+  	relaxGraphBG = loadImage("graphs/relax_gradient2.png");
+  	focusGraphBG = loadImage("graphs/focus_gradient2.png");
   	relaxGraph = new RiriGraph(4*(WIDTH/6) + 30, 20, WIDTH/6, 2*HEIGHT/3 + 20, relaxGraphBG, 0);
   	focusGraph = new RiriGraph(WIDTH/6 - 30, 20, WIDTH/6, 2*HEIGHT/3 + 20, focusGraphBG, 1);
   	// Speaker setup
-  	relaxSpeakerBG = loadImage("relax_radial.png");
-  	focusSpeakerBG = loadImage("focus_radial.png");
+  	relaxSpeakerBG = loadImage("speakers/relax_radial.png");
+  	focusSpeakerBG = loadImage("speakers/focus_radial.png");
   	relaxSpeaker1 = new RiriSpeaker(WIDTH - 250 - 120, HEIGHT/4 - 125, 200, 200, relaxSpeakerBG);
   	relaxSpeaker2 = new RiriSpeaker(WIDTH - 350 - 70, 3*(HEIGHT/4) - 175, 300, 300, relaxSpeakerBG);
   	focusSpeaker1 = new RiriSpeaker(155, HEIGHT/4 - 125, 200, 200, focusSpeakerBG);
@@ -254,11 +254,11 @@ void setup() {
 	brainGood = new SVGWidget(15*(WIDTH/30) - KNOB_SIZE/2 + 20, KNOB_Y - KNOB_SIZE/5, KNOB_SIZE, KNOB_SIZE, dot_green);
 	brainBad = new SVGWidget(15*(WIDTH/30) - KNOB_SIZE/2 + 20, KNOB_Y + KNOB_SIZE/8, KNOB_SIZE, KNOB_SIZE, jellybean_dark);
 	// Overlays
-	focusOverlay = loadImage("antwan/focusoverlay.png");
-	relaxOverlay = loadImage("antwan/relaxoverlay.png");
-	focusShadow = loadImage("antwan/focusspeaker_shade.png");
-	relaxShadow = loadImage("antwan/relaxspeaker_shade.png");
-	widgetOverlay = loadImage("antwan/widgetoverlay.png");
+	focusOverlay = loadImage("overlays/focusoverlay.png");
+	relaxOverlay = loadImage("overlays/relaxoverlay.png");
+	focusShadow = loadImage("overlays/focusspeaker_shade.png");
+	relaxShadow = loadImage("overlays/relaxspeaker_shade.png");
+	widgetOverlay = loadImage("overlays/widgetoverlay.png");
 }
 
 /*
