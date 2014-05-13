@@ -1,3 +1,14 @@
+/******************************
+*******************************
+*	Imports and Dependencies  *
+*	- TheMidiBus 			  *
+*	- serial 				  *
+*	- Arduino (Firmata) 	  *
+*	- Ani 					  *
+*	- java.util.Map 		  *
+*******************************
+*******************************/
+
 import themidibus.*;
 import processing.serial.*;
 import org.firmata.*;
@@ -5,120 +16,130 @@ import cc.arduino.*;
 import de.looksgood.ani.*;
 import java.util.Map;
 
-/*
-*	Instance Vars
-*/
+/*******************
+********************
+*	Instance Vars  *
+********************
+********************/
 
 // Sketch props
-int WIDTH = 3072;
-int HEIGHT = 768;
-int WIDGET_HEIGHT = 40;
-boolean playing;
-boolean DEBUG = false;
-int FRAME_RATE = 60;
+int WIDTH = 3072;			// Width of the sketch
+int HEIGHT = 768;			// Height of the sketch
+int WIDGET_HEIGHT = 40;		// Size of the widgets
+boolean playing;			// Is the game running?
+boolean DEBUG = false;		// Debug mode
+int FRAME_RATE = 60;		// Frame rate of the sketch
 
 // Colors
-color neutralColor = color(255,220,46);
-color relaxColor = color(16,255,160);
-color veryRelaxColor = color(13,255,234);
-color focusColor = color(240,133,46);
-color veryFocusColor = color(155,34,184);
-color otherColor = color(133,0,192);
+color neutralColor = color(255,220,46);		// Yellow
+color relaxColor = color(16,255,160);		// Green
+color veryRelaxColor = color(13,255,234);	// Blue
+color focusColor = color(240,133,46);		// Orange
+color veryFocusColor = color(155,34,184);	// Pink
+color otherColor = color(133,0,192);		// Purple
 
-// MidiBus + instruments
-String MIDI_PORT = "Virtual MIDI Bus";
-MidiBus mb;
-int channel1, channel2, channel3, channel4, channel5, channel6;
-RiriSequence kick, perc1, perc2, bass, synth1, synth2;
+// MidiBus and instruments
+String MIDI_PORT = "Virtual MIDI Bus";							// Name of system's virtual MIDI bus
+MidiBus mb;														// MidiBus instance
+int channel1, channel2, channel3, channel4, channel5, channel6; // MIDI channel numbers
+RiriSequence kick, perc1, perc2, bass, synth1, synth2;			// RiriSequences for each instrument
 
-// Data + levels
-int HISTORY_LENGTH = 8;
-int BASE_LEVEL_STEP = 4;
-int MAX_FOCUS = 100;
-int MAX_RELAX = -100;
-int MAX_BPM = 100;
-int MIN_BPM = 50;
-int pulse, bpm, grain;
-int focusRelaxLevel, level;
-//IntList pulseHist, levelHist;
-IntList levelHist;
+// Data and levels
+int HISTORY_LENGTH = 8;			// Number of previous data points to keep
+int BASE_LEVEL_STEP = 4;		// Base step for changing the overall brain level (focusRelaxLevel)
+int MAX_FOCUS = 100;			// Max "focus" value
+int MAX_RELAX = -100;			// Max "relax" value
+int MAX_BPM = 100;				// Max tempo (in beats per minute)
+int MIN_BPM = 50;				// Min tempo (in beats per minute)
+int pulse, bpm, grain;			// Pulse reading, global bpm, global "grain" (music activity level)
+int focusRelaxLevel, level;		// Brain level reading, global brain level
+IntList levelHist; //pulseHist, // Lists for pulse history, brain level history
 
 // Timekeeping
-int BEATS_PER_MEASURE = 4;
-int MEASURES_PER_PHASE = 8;
-int PHASES_PER_SONG = 4;
-int DELAY_THRESHOLD = 100;
-int beat, measure, phase, mils, lastMils, delay, delayA, delayB;
+int BEATS_PER_MEASURE = 4;					// Number of beats in each measure (default: 4)
+int MEASURES_PER_PHASE = 8;					// Number of measures per song section (default: 8)
+int PHASES_PER_SONG = 4;					// Number of sections in the song (default: 4)
+int DELAY_THRESHOLD = 100;					// Maximum allowed delay (in milliseconds)
+int beat, measure, phase, mils, lastMils; 	// Current beat, measure, phase, and time (in milliseconds)
+int delay, delayA, delayB;					// Current accumulated delay and delay trackers
 
-// Music + scales
-int SCORE_EASING_STEPS = 5;
-int score_easing = SCORE_EASING_STEPS;
-int score_effect_val = 0;
-int PITCH_C = 60;
-int PITCH_F = 65;
-int PITCH_G = 67;
-int[] SCALE = {0, 3, 5, 7, 8};
-float[] BEATS = {1, .5, .25, .125};
-int pitch;
+// Music & scales
+int SCORE_EASING_STEPS = 5;				// Number of frames to ease score effect over
+int score_easing = SCORE_EASING_STEPS;	// Easing step counter
+int score_effect_val = 0;				// Current value for the score effect
+int PITCH_C = 60;						// MIDI pitch of the middle "C" note
+int PITCH_F = 65;						// MIDI pitch of the middle "F" note
+int PITCH_G = 67;						// MIDI pitch of the middle "G" note
+int[] SCALE = {0, 3, 5, 7, 8};			// Minor pentatonic scale pattern (in intervals)
+float[] BEATS = {1, .5, .25, .125};		// Beat values (as fractions of a beat)
+int pitch;								// Current base pitch
 
 // Filters
-int highPassFilterVal, lowPassFilterVal;
+int highPassFilterVal, lowPassFilterVal;	// Values for the high and low pass filters (controlled by Records)
 
 // MindFlex (Serial)
-//int MINDFLEX_PORT = 0;
-String MINDFLEX_PORT = "COM3";
-int START_PACKET = 3;
-int LEVEL_STEP = 10;
-Serial mindFlex;
-PrintWriter output;
-int packetCount, globalMax;
+String MINDFLEX_PORT = "COM3";	// Name of the serial port the MindFlex Arduino is connected to
+int START_PACKET = 3;			// What packet of brain data to start using for the game
+int LEVEL_STEP = 10;			// Amount to increase focusRelaxLevel by each read
+Serial mindFlex;				// Serial object for the MindFlex
+PrintWriter output;				// Writer for outputting brain data
+int packetCount;				// Counter for current brain data packet
+int globalMax;					// Maximum brain wave value, used for rounding
 
 // DataGen - Tom
-HashMap<String,Integer> inputSettings;
-DataGenerator dummyDataGenerator;
-boolean useDummyData;
+HashMap<String,Integer> inputSettings;	// Map of input settings for the Data Generator
+DataGenerator dummyDataGenerator;		// Data Generator instance
+boolean useDummyData;					// Switch for using the data generator
 
 // Brain Level Graphs - Ben
-RiriGraph relaxGraph, focusGraph;
-PImage relaxGraphBG, focusGraphBG;
+RiriGraph relaxGraph, focusGraph;	// Brain Level Graph UI components
+PImage relaxGraphBG, focusGraphBG;	// Background images for Graphs
 
 // Speakers - Brennan
-RiriSpeaker relaxSpeaker1, relaxSpeaker2, focusSpeaker1, focusSpeaker2;
-PImage relaxSpeakerBG, focusSpeakerBG;
+RiriSpeaker relaxSpeaker1, relaxSpeaker2, focusSpeaker1, focusSpeaker2; // Speaker UI components
+PImage relaxSpeakerBG, focusSpeakerBG;									// Background images for Speakers
 
 // Records - Mia
-//int RECORD_ARDUINO_PORT = 1;
-String RECORD_ARDUINO_PORT = "COM5";
-int RELAX_RECORD_PIN = 2;
-int FOCUS_RECORD_PIN = 0;
-Arduino recordArduino;
-boolean recordArduinoOn;
-RiriRecord relaxRecord, focusRecord;
-float relaxRecordData, focusRecordData;
-color relaxRecordColor, focusRecordColor, recordBackgroundColor;
+String RECORD_ARDUINO_PORT = "COM5";								// Name of the serial port the pressure sensor Arduino is connected to
+int RELAX_RECORD_PIN = 2;											// Data pin number for the "relax" Record
+int FOCUS_RECORD_PIN = 0;											// Data pin number for the "focus" Record
+Arduino recordArduino;												// Arduino object for the pressure sensor Arduino
+boolean recordArduinoOn;											// Switch for using the record Arduino
+RiriRecord relaxRecord, focusRecord;								// Effect Record UI components
+float relaxRecordData, focusRecordData;								// Data values for Records
+color relaxRecordColor, focusRecordColor, recordBackgroundColor;	// Colors for the Records active and background colors
 
 // Widgets - Brennan
-String WIDGET_DIR = "widgets/";
-int KNOB_SIZE = 120;
-int KNOB_Y = 630;
-PShape knob_blue, knob_green, knob_orange, knob_pink, knobtrack_white, knobtrack_dark;
-PShape brain, dot_green, dot_dark, jellybean_dark, jellybean_pink;
-PImage knob_yellow_image;
-SVGWidget relaxKnob1, relaxKnob2, relaxKnob3, relaxKnob4, focusKnob1, focusKnob2, focusKnob3, focusKnob4;
-SVGWidget brainGood, brainBad, brainWidget;
-ImageWidget grainKnob;
+String WIDGET_DIR = "widgets/";										// Widgets image/shape directory
+int KNOB_SIZE = 120;												// Size of the knob widgets
+int KNOB_Y = 630;													// Starting Y position of the widgets
+PShape knob_blue, knob_green, knob_orange, knob_pink;				// Shapes for the knobs (loaded from SVGs)
+PShape knobtrack_white, knobtrack_dark;								// Shapes for the knobtracks (loaded from SVGs)
+PShape brain, dot_green, dot_dark, jellybean_dark, jellybean_pink;	// Shapes for the brain status (loaded from SVGs)
+PImage knob_yellow_image;											// Image for the yellow "grain" knob (loaded from image)
+SVGWidget relaxKnob1, relaxKnob2, relaxKnob3, relaxKnob4; 			// Widget objects for the relax knobs
+SVGWidget focusKnob1, focusKnob2, focusKnob3, focusKnob4;			// Widget objects for the focus knobs
+SVGWidget brainGood, brainBad, brainWidget;							// Widget objects for the brain status 
+ImageWidget grainKnob;												// Widget object for the grain knob
 
 // Stage - Tom and Whitney
-ScrollingStage myStage;
+ScrollingStage myStage;	// Main game stage instance
 
 // Panels - Antwan
-PImage focusOverlay, relaxOverlay, focusShadow, relaxShadow, widgetOverlay;
+PImage focusOverlay, relaxOverlay, focusShadow, relaxShadow, widgetOverlay; // Images for the overlays and panels
+
+/*******************
+********************
+*	Sketch Setup   *
+********************
+********************/
 
 /*
-*	Sketch Setup
+*	init()
+*	- Initialize the sketch
 */
-
 void init() {
+	// If we're not in debug mode, go fullscreen
 	if (DEBUG != true) {
 	  	frame.removeNotify();
 	 	frame.setUndecorated(true);
@@ -127,6 +148,10 @@ void init() {
 	super.init(); 
 }
 
+/*
+*	setup()
+*	- Initialize all data and objects used in the sketch
+*/
 void setup() {
 	// Sketch setup
 	size(WIDTH, HEIGHT);
@@ -167,6 +192,7 @@ void setup() {
 	inputSettings = new HashMap<String,Integer>();
 	useDummyData = false;
 	// MindFlex setup
+	// If the Serial connection fails, default to dummy data
 	packetCount = 0;
 	globalMax = 0;
 	println("Serial:");
@@ -174,7 +200,6 @@ void setup() {
 	    println("[" + i + "] " + Serial.list()[i]);
 	}
 	try {
-		//mindFlex = new Serial(this, Serial.list()[MINDFLEX_PORT], 9600);
 		mindFlex = new Serial(this, MINDFLEX_PORT, 9600);
 		mindFlex.bufferUntil(10);
 		String date = day() + "_" + month() + "_" + year();
@@ -187,7 +212,6 @@ void setup() {
 	}
 	// Stage
 	myStage = new ScrollingStage(WIDTH/2, KNOB_Y/2, WIDTH/3, HEIGHT);
-	//thread("drawStageStuff");
 	// Graph setup
   	relaxGraphBG = loadImage("graphs/relax_gradient2.png");
   	focusGraphBG = loadImage("graphs/focus_gradient2.png");
@@ -201,6 +225,7 @@ void setup() {
   	focusSpeaker1 = new RiriSpeaker(155, HEIGHT/4 - 125, 200, 200, focusSpeakerBG);
   	focusSpeaker2 = new RiriSpeaker(110, 3*(HEIGHT/4) - 175, 300, 300, focusSpeakerBG);
   	// Record setup
+  	// If the Arduino connection fails, default to dummy data
   	relaxRecordData = 0;
   	focusRecordData = 0;
 	try{
@@ -262,19 +287,24 @@ void setup() {
 }
 
 /*
-*	Draw Loop
+*	draw()
+*	- Update values for UI components
+*	- Draw the UI components
+*	- Play the music
 */
 
 void draw() {
-	delayA = millis();
+	// If the sketch just started and debug is off, launch from the top-left corner of the screen
 	if (frameCount == 1 && DEBUG != true) {
 	    frame.setLocation(0,0); 
 	}
-	background(0);
+	// Start tracking the delay caused by drawing
+	delayA = millis();
   	// Draw the stage
+  	background(0);
   	myStage.update();
   	myStage.draw();
-  	// Stage
+  	// Update UI components after the stage has loaded
   	if (myStage.doneLoading) {
   		// Graphs
 	  	relaxGraph.draw();
@@ -284,6 +314,7 @@ void draw() {
 	  	image(relaxOverlay, 2*(WIDTH/3), 0);
 	  	image(widgetOverlay, WIDTH/3, 0);
 	  	// Records
+	  	// Get data from the pressure sensors or, if disconnected, the data generator
 		if (recordArduinoOn) {
 		    relaxRecordData = recordArduino.analogRead(RELAX_RECORD_PIN);
 		    focusRecordData = recordArduino.analogRead(FOCUS_RECORD_PIN); 
@@ -296,6 +327,7 @@ void draw() {
 	 	focusRecord.dataValue = focusRecordData;
 		relaxRecord.draw();
 		focusRecord.draw();
+		// Draw an indicator if the pressure sensor Arduino is disconnected
 		if (!recordArduinoOn) {
 			noStroke();
 			fill(otherColor);
@@ -313,6 +345,8 @@ void draw() {
 	  	image(focusShadow, 0, 0);
 	  	image(relaxShadow, 2*(WIDTH/3), 0);
 	  	// Timemarkers
+	  	// Fills in a new circle for each measure of the song
+	  	// (Expects default of 8 measures per phase, 4 phases per song)
 	  	for (int i = 0; i < MEASURES_PER_PHASE * PHASES_PER_SONG; i++) {
 	  		int timeX = WIDTH/3 + 155 + i*23;
 	  		int timeY = 600;
@@ -343,6 +377,7 @@ void draw() {
 		shape(knobtrack_white, 14*(WIDTH/30) - 20, KNOB_Y - 5, KNOB_SIZE + 20, KNOB_SIZE + 20);
 		grainKnob.draw();
 		brainWidget.draw();
+		// Toggle the brain status from "good" to "bad" if the MindFlex Arduino is disconnected
 		if (useDummyData) {
 			brainGood.setShape(dot_dark);
 			brainBad.setShape(jellybean_pink);
@@ -354,12 +389,15 @@ void draw() {
 		brainGood.draw();
 		brainBad.draw();
   	}
+  	// Finish tracking the draw delay
 	delayB = millis();
 	// Music
+	// Play the song if the game has started
 	if (playing) {
-		// Music
+		// Play music
 		playMusic(delayB - delayA);
 		// Filters
+		// Only use if the pressure sensors are connected
 		if (recordArduinoOn) {
 			highPassFilterVal = (int) map(relaxRecordData, 0, 1023, 0, 127);
 			lowPassFilterVal = (int) map(focusRecordData, 0, 1023, 127, 0); 
@@ -369,6 +407,7 @@ void draw() {
     	RiriMessage lowPassFilterMsg = new RiriMessage(176, 0, 103, lowPassFilterVal);
     	lowPassFilterMsg.send();
     	// Score effect
+    	// If a point was score, ease the effect in. Afterward, slowly fade back to normal
     	if (score_easing < SCORE_EASING_STEPS) {
     		score_effect_val += (120 / SCORE_EASING_STEPS);
     		score_easing++;
@@ -382,7 +421,7 @@ void draw() {
     	RiriMessage effectMsg = new RiriMessage(176, 0, 106, score_effect_val);
     	effectMsg.send();
 	}
-	// DEBUG
+	// Debug log
 	if (DEBUG) {
 		textAlign(LEFT);
 		textSize(10);
@@ -412,26 +451,48 @@ void draw() {
 	}
 }
 
+/********************
+*********************
+*	Music Playing   *
+*********************
+********************/
+
 /*
-*	Music Playing
+*	startEEGJ()
+*	- Start the game and the song
 */
 
 void startEEGJ() {
+	// Only start if the stage is done loading
 	if (myStage.doneLoading) {
+		// Toggle the playing boolean
 		playing = true;
+		// Reset the score and brain level
 		focusRelaxLevel = 0;
 		myStage.score = 0;
+		// Start recording in Ableton
 		//RiriMessage msg = new RiriMessage(176, 0, 104, 127);
 	    //msg.send();
+	    // Prepare the music and start playing
 		setupMusic();
 		startMusic();
 	}
 }
 
+/*
+*	stopEEGJ()
+*	- Stop playing the music
+*	- Reset the game state
+*	- Reset the widgets for the next song
+*/
+
 void stopEEGJ() {
+	// Only stop if the stage is done loading
 	if (myStage.doneLoading) {
+		// Reset the game state
 		myStage.setActiveHitzone(0);
 		myStage.activeNote = 0;
+		// Reset the widget positions
 		relaxKnob1.rotation(-90);
 		relaxKnob2.rotation(-90);
 		relaxKnob3.rotation(-90);
@@ -441,15 +502,26 @@ void stopEEGJ() {
 		focusKnob3.rotation(-90);
 		focusKnob4.rotation(-90);
 		grainKnob.rotation(-90);
+		// Stop the music
 		stopMusic();
+		// Reset the filters
 		//RiriMessage msg = new RiriMessage(176, 0, 105, 127); 
-		//RiriMessage msg = new RiriMessage(176, 0, 104, 0); 
+		//msg.send();
+		//msg = new RiriMessage(176, 0, 104, 0); 
 	    //msg.send();
+	    // Stop recording
 	    RiriMessage msg2 = new RiriMessage(176, 0, 106, 0);
 		msg2.send();
+		// Toggle the playing boolean
 		playing = false;
 	}
 }
+
+/*
+*	setupMusic()
+*	- Reset song state (beats, measures, phase)
+*	- Create the first measure for all the instrument RiriSequences
+*/
 
 void setupMusic() {
 	// Reset song position
@@ -467,7 +539,13 @@ void setupMusic() {
 	createRestMeasure(synth2);
 }
 
+/*
+*	startMusic()
+*	- Start playing all instrument RiriSequences
+*/
+
 void startMusic() {
+	// Start all the music tracks
 	kick.start();
 	perc1.start();
 	perc2.start();
@@ -476,27 +554,34 @@ void startMusic() {
 	synth2.start();
 }
 
+/*
+*	playMusic()
+*	- Progress the song if a beat (in nanoseconds) has passed
+*	- Prepare the next measure of music when necessary
+*	- Update the brain level history
+*/
+
 void playMusic(int drawDelay) {
 	// Get current time
 	mils = millis();
 	// Beat Change
-	if (mils > lastMils + beatsToNanos(1)/1000 - delay - drawDelay) {
+	// Occurs if the current time is greater than the time of the last beat plus the length of a beat
+	// Accounts for delay introduced by draw and previous calls to playMusic
+	if (mils >= lastMils + beatsToNanos(1)/1000 - delay - drawDelay) {
+		// Start tracking the delay introduces in playMusic
 		int milsA = mils;
-		// Update values
+		// Update values and histories
 		updateLevelHistory();
 		//updateBpmHistory();
 		// Update graphs and speakers
-		//if (level <= 0) {
-			relaxGraph.setMarkerX((int) map(level, 100, -100, 0, relaxGraph.graphWidth));
-			relaxSpeaker1.setSpeakerSize((int) map(level, 100, -100, 0, relaxSpeaker1.graphWidth/1.1));
-			relaxSpeaker2.setSpeakerSize((int) map(level, 100, -100, 0, relaxSpeaker2.graphWidth/1.1));
-		//}
-		//else if (level >= 0) {
-			focusGraph.setMarkerX((int) map(level, -100, 100, 0, focusGraph.graphWidth));
-			focusSpeaker1.setSpeakerSize((int) map(level, -100, 100, 0, focusSpeaker1.graphWidth/1.1));
-			focusSpeaker2.setSpeakerSize((int) map(level, -100, 100, 0, focusSpeaker2.graphWidth/1.1));
-		//}
-		// Update the Active Hit Zone
+		relaxGraph.setMarkerX((int) map(level, 100, -100, 0, relaxGraph.graphWidth));
+		relaxSpeaker1.setSpeakerSize((int) map(level, 100, -100, 0, relaxSpeaker1.graphWidth/1.1));	
+		relaxSpeaker2.setSpeakerSize((int) map(level, 100, -100, 0, relaxSpeaker2.graphWidth/1.1));
+		focusGraph.setMarkerX((int) map(level, -100, 100, 0, focusGraph.graphWidth));
+		focusSpeaker1.setSpeakerSize((int) map(level, -100, 100, 0, focusSpeaker1.graphWidth/1.1));
+		focusSpeaker2.setSpeakerSize((int) map(level, -100, 100, 0, focusSpeaker2.graphWidth/1.1));
+		// Update the Active Hit Zone on the stage
+		// Active Hit Zone depends on the current brain level
 		if (level >= 50) {
 			myStage.setActiveHitzone(1);
 		}
@@ -512,9 +597,10 @@ void playMusic(int drawDelay) {
 		else {
 			myStage.setActiveHitzone(5);
 		}
-		// Game stuff
+		// Spawn a new note on the stage if there is none
 		if (myStage.activeNote == 0) {
 			int notePos = 0;
+			// Determine where to spawn the note based on the current active hit zone
 			if (myStage.activeHitzone == 5) {
 				notePos = myStage.activeHitzone + round(random(-1, 0));
 			}
@@ -526,13 +612,14 @@ void playMusic(int drawDelay) {
 			}
 			myStage.spawnNote(notePos);
 		}
+		// Move the current note down the stage
 		else {
 			myStage.incrementNote(1);
 		}
-		// Music stuff
+		// Measure change
 		if (beat == BEATS_PER_MEASURE) {
 			beat = 1;
-			// Measure Change
+			// Phase change
 			if (measure == MEASURES_PER_PHASE) {
 				measure = 1;
 				if (phase == PHASES_PER_SONG) {
@@ -542,6 +629,7 @@ void playMusic(int drawDelay) {
 				}
 				else {
 					phase++;
+					// Reset the brain level if we're maxed out/too high
 					if (abs(focusRelaxLevel) >= 60)
 						focusRelaxLevel = 0;
 				}
@@ -559,10 +647,12 @@ void playMusic(int drawDelay) {
 			// Prepare the next measure
 			setMeasureLevelAndGrain();
 			setMeasureBPM();
+			// Reset instruments to keep everything in sync
 			if (measure == MEASURES_PER_PHASE) {
 				resetInstruments();
 			}
 			createMeasure();
+			// Generate some dummy data if we don't have the MindFlex
 			if (useDummyData) {
 				String input = dummyDataGenerator.getInput("brainwave");
 				calculateFocusRelaxLevel(input);
@@ -572,16 +662,23 @@ void playMusic(int drawDelay) {
 		else {
 			beat++;
 		}
-		// Update the time
+		// Update the time of the last beat
 		lastMils = millis();
+		// Calculate the delay
 		int milsB = millis();
 		//println("\tB: "+milsB);
 		delay += milsB - milsA;
 		//delay = milsB - milsA;
-		println("DELAY: "+delay);
+		//println("DELAY: "+delay);
+		// Reset the delay if it's too great
 		if (delay > DELAY_THRESHOLD) delay = 10;
 	}
 }
+
+/*
+*	stopMusic()
+*	- Stop all the instrument RiriSequences
+*/
 
 void stopMusic() {
 	// Stop all instruments
@@ -593,8 +690,15 @@ void stopMusic() {
 	synth2.quit();
 }
 
+/******************
+*******************
+*	Instruments   *
+*******************
+*******************/
+
 /*
-*	Instruments
+*	createInstruments()
+*	- Initialize the RiriSequence objects for each instrument on a different channel
 */
 
 void createInstruments() {
@@ -606,17 +710,31 @@ void createInstruments() {
 	synth2 = new RiriSequence(channel6);
 }
 
+/*
+*	resetInstruments()
+*	- Recreate the instrument RiriSequence objects 
+*/
+
 void resetInstruments() {
+	// Stop the music
 	stopMusic();
+	// Create the instrument RiriSequence objects
 	createInstruments();
+	// Add a beat of rest for each instrument
 	kick.addRest(beatsToNanos(1));
 	perc1.addRest(beatsToNanos(1));
 	perc2.addRest(beatsToNanos(1));
 	bass.addRest(beatsToNanos(1));
 	synth1.addRest(beatsToNanos(1));
 	synth2.addRest(beatsToNanos(1));
+	// Start the music again
 	startMusic();
 }
+
+/*
+*	createMeasure()
+*	- Call each instrument's create function
+*/
 
 void createMeasure() {
 	createKickMeasure();
@@ -627,11 +745,21 @@ void createMeasure() {
 	createSynth2Measure();
 }
 
+/*
+*	createRestMeasure()
+*	- Add a measure of rest to the given instrument RiriSequence
+*/
+
 void createRestMeasure(RiriSequence seq) {
 	seq.addRest(beatsToNanos(BEATS_PER_MEASURE));
 }
 
-void createKickMeasure() { // Bass drum
+/*
+*	createKickMeasure()
+*	- Create a measure for the bass drum instrument
+*/
+
+void createKickMeasure() { 
 	// Play a repeated riff
 	kick.addNote(36, 120, beatsToNanos(.5));
 	kick.addNote(36, 120, beatsToNanos(.5));
@@ -643,7 +771,13 @@ void createKickMeasure() { // Bass drum
 	kick.addNote(36, 120, beatsToNanos(.75));
 }
 
-void createPerc1Measure() { // Clap & Hi-hat
+/*
+*	createPerc1Measure
+*	- Create a measure for the clap and hi-hat cymbal
+*/
+
+void createPerc1Measure() { 
+	// Shortcuts to important MIDI pitches
 	int close = 42;
 	int open = 46;
 	int clap = 39;
@@ -656,7 +790,7 @@ void createPerc1Measure() { // Clap & Hi-hat
 			perc1.addRest(beatsToNanos(1));
 			perc1.addNote(clap, 120, beatsToNanos(1));
 		}
-		// Grain 2 = 2 claps
+		// Grain 2 = two claps
 		else if (grain == 2) {
 			perc1.addRest(beatsToNanos(1));
 			perc1.addNote(clap, 120, beatsToNanos(.75));
@@ -694,19 +828,29 @@ void createPerc1Measure() { // Clap & Hi-hat
 	}
 }
 
-void createPerc2Measure() { // Woodblock
-	// Always play
+/*
+*	createPerc2Measure()
+*	- Create a measure for the woodblock
+*/
+
+void createPerc2Measure() { 
+	// Always play every other beat
 	perc2.addRest(beatsToNanos(1));
 	perc2.addNote(40, 120, beatsToNanos(1));
 	perc2.addRest(beatsToNanos(1));
 	perc2.addNote(40, 120, beatsToNanos(1));
 }
 
-void createBassMeasure() { // Bass
-	// Determine how to play
+/*
+*	createBassMeasure()
+*	- Create a measure for the bass synth
+*/
+
+void createBassMeasure() {
+	// Determine the adjusted grain and velocity based on brain level
 	int g = (level >= 0) ? grain : 0;
 	int velocity = (level >= 0) ? 80 + 10*grain : 80 - 10*grain;
-	// Play randomized half-notes
+	// Play randomized half-notes if the grain is low
 	if (g == 0 || g == 1) {
 		// Random notes for now
 		for (int i = 0; i < 2; i++) {
@@ -714,18 +858,24 @@ void createBassMeasure() { // Bass
 			bass.addNote(p1, 80, beatsToNanos(2));
 		}
 	}
-	// Play a motif (random notes followed by root pitch)
+	// If the grain is high, play a motif (random notes followed by root pitch)
 	else {
 		// Random notes for now
 		for (int i = 0; i < 2; i++) {
 			int p1 = pitch + SCALE[(int) random(0, SCALE.length)] - 24;
 			bass.addNote(p1, 80, beatsToNanos(.75));
 		}
+		// Also the root pitch
 		bass.addNote(pitch + SCALE[0] - 24, 80, beatsToNanos(2.5));
 	}
 }
 
-void createSynth1Measure() { // Arp
+/*
+*	createSynth1Measure()
+*	- Create a measure for the arpeggiator/lead synth
+*/
+
+void createSynth1Measure() { 
 	// Play if relax is active
 	if (level <= 0) {
 		// Grain 0 = random quarter notes
@@ -770,8 +920,13 @@ void createSynth1Measure() { // Arp
 	}
 }
 
-void createSynth2Measure() { // Pad
-	// Determine the interval
+/*
+*	createSynth2Measure()
+*	- Create a measure for the pad/harmony synth
+*/
+
+void createSynth2Measure() { 
+	// Determine the interval based on the grain
 	float interval = (level <= 0) ? BEATS[grain] : BEATS[0];
 	int velocity = (level <= 0) ? 80 + 10*grain : 80 - 20*grain;
 	// Play a number of chords based on the interval
@@ -785,9 +940,17 @@ void createSynth2Measure() { // Pad
 	}
 }
 
+/*********************
+**********************
+*	Keyboard Input   *
+**********************
+*********************/
+
 /*
-*	Keyboard Input
+*	keyPressed()
+*	- Handle keyboard input
 */
+
 void keyPressed() {
 	// Play/stop
 	if (key == ' ') {
@@ -825,7 +988,7 @@ void keyPressed() {
 		lowPassFilterVal -= 5;
 		if (lowPassFilterVal < 0) lowPassFilterVal = 0;
 	}
-	// MIDI control setup
+	// MIDI control setup for Ableton
 	if (key == 'z') { //  High Pass
 		RiriMessage msg = new RiriMessage(176, 0, 102, 0);
     	msg.send();
@@ -855,8 +1018,14 @@ void keyPressed() {
 	}
 }
 
+/****************
+*****************
+*	Utilities   *
+*****************
+****************/
+
 /*
-*	Utilities
+*	Convert a given number of beats to nanoseconds
 */
 
 int beatsToNanos(float BEATS){
@@ -865,13 +1034,9 @@ int beatsToNanos(float BEATS){
   return round(convertedNumber);
 }
 
-float grainToBeat() {
-	return BEATS[grain];
-}
-
-float grainToMils() {
-	return beatsToNanos(grainToBeat());
-}
+/*
+*	Adjust the brain level on keyboard input
+*/
 
 void addFocus() {
 	focusRelaxLevel += (BASE_LEVEL_STEP - grain);
@@ -882,6 +1047,10 @@ void addRelax() {
 	focusRelaxLevel -= (BASE_LEVEL_STEP - grain);
 	if (focusRelaxLevel < MAX_RELAX) focusRelaxLevel = MAX_RELAX;
 }
+
+/*
+*	Update the histories for brain level and BPM
+*/
 
 void updateLevelHistory() {
 	if (levelHist.size() == 4) {
@@ -897,25 +1066,22 @@ void updateBpmHistory() {
 	}
 	pulseHist.append(pulse);
 }
+*/
 
-void setMeasureBPM() {
-	// Get the average BPM
-	float val = 0; 
-	for (int i = 0; i < pulseHist.size(); i++) {
-		val += pulseHist.get(i);
-	}
-	val = val/pulseHist.size();
-	bpm = (int) val;
-}
+/*
+*	Set the value of the bpm and level for the current measure
 */
 
 void setMeasureBPM() {
+	// Slow down if relaxed
 	if (level < -20) {
 		bpm = (int) map(level, -20, -100, 80, 65);
 	}
+	// Speed up if focused
 	else if (level > 20) {
 		bpm = (int) map(level, 20, 100, 80, 95);
 	}
+	// Default to 80 BPM
 	else {
 		bpm = 80;
 	}
@@ -947,8 +1113,13 @@ void setMeasureLevelAndGrain() {
 	else {
 		grain = 0; // Iunno
 	}
+	// Rotate the grain knob widget
 	grainKnob.rotation((int) map(grain, 0, 3, -90, 90));
 }
+
+/*
+*	Determine the key for the current phase of the song
+*/
 
 void setPhaseKey() {
 	int p = phase + 1;
@@ -983,6 +1154,10 @@ void serialEvent(Serial p) {
 	calculateFocusRelaxLevel(input);
 }
 
+/*
+*	Calculate the focusRelaxLevel based on MindFlex/dummy data input
+*/
+
 void calculateFocusRelaxLevel(String input) {
 	// Parse the data
 	boolean goodRead = false;
@@ -994,19 +1169,25 @@ void calculateFocusRelaxLevel(String input) {
 		//println("good");
 		goodRead = true;
 	}
+	// Only interpret the data if the read was good
 	if (goodRead) {
+		// Convert the input string into an array of integers
 		String[] brainData = input.split(",");
 		int[] intData = new int[brainData.length];
+		// Only convert a properly formatted input packet
 		if (brainData.length > 8) {
 			packetCount++;
+			// Only convert if we've already gotten a few good data packets
 			if (packetCount > START_PACKET) {
 				for (int i = 0; i < brainData.length; i++) {
+					// Convert the data
 					String strVal = brainData[i].trim();
 					int intVal = Integer.parseInt(strVal);
-					// 0 THE DATA WHEN SIGNAL SUCKS
+					// Zero the data if the signal sucks
 					if ((Integer.parseInt(brainData[0]) == 200) && (i > 2)) {
 			          	intVal = 0;
 			        }
+			        // Add the data to the array
 			        intData[i] = intVal;
 				}
 			}
@@ -1017,6 +1198,7 @@ void calculateFocusRelaxLevel(String input) {
 		println("CONNECTION: "+connection);
 		int min = -1; 
 		int max = -1;
+		// Calculate the local (this packet) and global (sketch lifetime) maximum brainwave value
 		for (int i = 3; i < intData.length; i++) {
 			if (max < 0 || intData[i] > max) {
 				max = intData[i];
@@ -1030,16 +1212,16 @@ void calculateFocusRelaxLevel(String input) {
 		}
 		//println("MIN " + min + " MAX " + max);
 
-		// Rotate the knobs
-		/*relaxKnob1.rotation((int) map(intData[3], min, max, -90, 90));
-		relaxKnob2.rotation((int) map(intData[4], min, max, -90, 90));
-		relaxKnob3.rotation((int) map(intData[5], min, max, -90, 90));
-		relaxKnob4.rotation((int) map(intData[6], min, max, -90, 90));
-		focusKnob4.rotation((int) map(intData[7], min, max, -90, 90));
-		focusKnob3.rotation((int) map(intData[8], min, max, -90, 90));
-		focusKnob2.rotation((int) map(intData[9], min, max, -90, 90));
-		focusKnob1.rotation((int) map(intData[10], min, max, -90, 90));*/
+		// Rotate the knobs if the game is running
 		if (playing) {
+			/*relaxKnob1.rotation((int) map(intData[3], min, max, -90, 90));
+			relaxKnob2.rotation((int) map(intData[4], min, max, -90, 90));
+			relaxKnob3.rotation((int) map(intData[5], min, max, -90, 90));
+			relaxKnob4.rotation((int) map(intData[6], min, max, -90, 90));
+			focusKnob4.rotation((int) map(intData[7], min, max, -90, 90));
+			focusKnob3.rotation((int) map(intData[8], min, max, -90, 90));
+			focusKnob2.rotation((int) map(intData[9], min, max, -90, 90));
+			focusKnob1.rotation((int) map(intData[10], min, max, -90, 90));*/
 			relaxKnob1.rotation((int) map(intData[3], 0, globalMax, -90, 90));
 			relaxKnob2.rotation((int) map(intData[4], 0, globalMax, -90, 90));
 			relaxKnob3.rotation((int) map(intData[5], 0, globalMax, -90, 90));
@@ -1052,13 +1234,16 @@ void calculateFocusRelaxLevel(String input) {
 
 		// Interpret the data
 		int[] tmp = new int[intData.length - 3];
+		// Map the brainwave values based on the globalMax high value
 		for (int i = 3; i < intData.length; i++) {
 			//tmp[i-3] = (int) map(intData[i], min, max, 0, 100);
 			tmp[i-3] = (int) map(intData[i], 0, globalMax, 0, 100);
 		}
+		// Get an average of the "focus" and "relax" brainwaves
 		int focusVal = 0;
 		int relaxVal = 0;
 		float newLevel = 0;
+		// Split the brain data in two halves, relax and focus
 		for (int i = 1; i < tmp.length; i++) {
 			if (i < tmp.length/2) {
 				relaxVal += tmp[i];
@@ -1098,13 +1283,5 @@ void calculateFocusRelaxLevel(String input) {
 	}
 	else {
 		// Do something
-	}
-}
-
-void drawStageStuff() {
-	while (true) {
-		myStage.update();
-		myStage.draw();
-		delay(1000/FRAME_RATE);
 	}
 }
